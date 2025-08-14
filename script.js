@@ -1,6 +1,4 @@
-
-        // Quiz Questions Database
-        const questions = [
+ const questions = [
             {
                 question: "What does HTML stand for?",
                 options: ["Hyper Text Markup Language", "Home Tool Markup Language", "Hyperlinks Text Mark Language", "Hyper Text Making Language"],
@@ -63,114 +61,166 @@
         let warningCount = 0;
         let quizActive = false;
 
-        // Google Sheets Web App URL - REPLACE WITH YOUR ACTUAL URL
+        // AI Monitoring Variables
+        let video, canvas, ctx;
+        let faceApiLoaded = false;
+        let monitoringActive = false;
+        let faceDetectionInterval;
+        let lookAwayCount = 0;
+        let lastFaceDetection = Date.now();
+        let faceLostWarnings = 0;
+
+        // Google Sheets Web App URL
         const GOOGLE_SHEETS_URL = 'https://script.google.com/macros/s/AKfycbxJ_aTBGvd4NKJAp2TcRzTHeudLTzpR9G69szmGAUfMNQT_xVZf8SbOn9GcRWVl0WdFSQ/exec';
 
         // Initialize
-        window.addEventListener('load', function() {
-            // Initialize answers array
+        window.addEventListener('load', async function() {
             answers = new Array(questions.length).fill(null);
-            
-            // Set total questions
             document.getElementById('totalQ').textContent = questions.length;
             
-            // Setup security features
-            disableRightClick();
-            preventTabSwitch();
-            preventCopy();
-            detectDevTools();
-            setupFullscreenMonitoring();
+            setupSecurityFeatures();
+            await initializeFaceDetection();
         });
 
-        // Fullscreen Functions
-        function enterFullscreen() {
-            const elem = document.documentElement;
-            
-            const fullscreenPromise = elem.requestFullscreen?.() ||
-                                    elem.webkitRequestFullscreen?.() ||
-                                    elem.msRequestFullscreen?.() ||
-                                    elem.mozRequestFullScreen?.();
+        // Face Detection Initialization
+        async function initializeFaceDetection() {
+            try {
+                video = document.getElementById('videoElement');
+                canvas = document.getElementById('canvas');
+                ctx = canvas.getContext('2d');
 
-            if (fullscreenPromise) {
-                return fullscreenPromise.catch(err => {
-                    console.log('Fullscreen request failed:', err);
-                    showWarning('Please allow fullscreen mode to continue with the test.');
-                    return Promise.reject(err);
+                // Load Face API models
+                await faceapi.nets.tinyFaceDetector.loadFromUri('https://cdnjs.cloudflare.com/ajax/libs/face-api.js/0.22.2/models');
+                await faceapi.nets.faceLandmark68Net.loadFromUri('https://cdnjs.cloudflare.com/ajax/libs/face-api.js/0.22.2/models');
+                await faceapi.nets.faceRecognitionNet.loadFromUri('https://cdnjs.cloudflare.com/ajax/libs/face-api.js/0.22.2/models');
+                
+                faceApiLoaded = true;
+                updateFaceInfo('AI Models Loaded ✓');
+                
+                // Get camera access
+                const stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: { 
+                        width: 640, 
+                        height: 480,
+                        facingMode: 'user'
+                    } 
                 });
-            } else {
-                showWarning('Fullscreen mode is not supported on this browser.');
-                return Promise.reject(new Error('Fullscreen not supported'));
+                video.srcObject = stream;
+                
+                video.addEventListener('loadedmetadata', () => {
+                    canvas.width = video.videoWidth;
+                    canvas.height = video.videoHeight;
+                    updateFaceInfo('Camera Ready ✓');
+                });
+
+            } catch (error) {
+                console.error('Face detection initialization failed:', error);
+                updateFaceInfo('Camera Error ✗');
+                showWarning('Camera access required for AI monitoring. Please allow camera access and refresh the page.');
             }
         }
 
-        function exitFullscreen() {
-            if (document.exitFullscreen) {
-                document.exitFullscreen();
-            } else if (document.webkitExitFullscreen) {
-                document.webkitExitFullscreen();
-            } else if (document.msExitFullscreen) {
-                document.msExitFullscreen();
-            } else if (document.mozCancelFullScreen) {
-                document.mozCancelFullScreen();
+        // Start Face Monitoring
+        function startFaceMonitoring() {
+            if (!faceApiLoaded || !video) {
+                showWarning('AI monitoring system not ready. Please refresh and try again.');
+                return;
             }
-        }
 
-        function isFullscreen() {
-            return !!(document.fullscreenElement || 
-                     document.webkitFullscreenElement || 
-                     document.msFullscreenElement || 
-                     document.mozFullScreenElement);
-        }
+            monitoringActive = true;
+            document.getElementById('cameraStatus').classList.add('monitoring');
+            document.getElementById('cameraContainer').classList.add('active');
+            updateFaceInfo('AI Monitoring Active 👁️');
 
-        function setupFullscreenMonitoring() {
-            // Listen for fullscreen change events
-            document.addEventListener('fullscreenchange', handleFullscreenChange);
-            document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
-            document.addEventListener('mozfullscreenchange', handleFullscreenChange);
-            document.addEventListener('msfullscreenchange', handleFullscreenChange);
+            faceDetectionInterval = setInterval(async () => {
+                if (!quizActive || !monitoringActive) return;
 
-            // Prevent F11 and Escape keys during quiz
-            document.addEventListener('keydown', function(e) {
-                if (quizActive) {
-                    if (e.key === 'F11') {
-                        e.preventDefault();
-                        showWarning('Please do not use F11! Use only the quiz interface.');
-                        return false;
+                try {
+                    const detections = await faceapi.detectAllFaces(video, new faceapi.TinyFaceDetectorOptions())
+                        .withFaceLandmarks()
+                        .withFaceDescriptors();
+
+                    if (detections.length === 0) {
+                        handleNoFaceDetected();
+                    } else if (detections.length === 1) {
+                        handleFaceDetected(detections[0]);
+                    } else {
+                        handleMultipleFaces();
                     }
-                    if (e.key === 'Escape') {
-                        e.preventDefault();
-                        showWarning('Escape key is disabled during the quiz!');
-                        return false;
-                    }
+                } catch (error) {
+                    console.error('Face detection error:', error);
                 }
-            });
+            }, 500); // Check every 500ms
         }
 
-        function handleFullscreenChange() {
-            console.log('Fullscreen change detected. Quiz active:', quizActive, 'Is fullscreen:', isFullscreen());
+        function handleFaceDetected(detection) {
+            lastFaceDetection = Date.now();
+            faceLostWarnings = 0;
             
-            // Only check if quiz is active and we're not in results phase
-            if (quizActive && !document.querySelector('.results').classList.contains('active')) {
-                if (!isFullscreen()) {
-                    // User exited fullscreen during quiz - end test immediately
-                    showWarning('🚫 Quiz terminated! You exited fullscreen mode.');
-                    setTimeout(() => {
-                        endQuizDueToViolation();
-                    }, 2000);
+            // Check eye gaze direction (simplified)
+            const landmarks = detection.landmarks;
+            const leftEye = landmarks.getLeftEye();
+            const rightEye = landmarks.getRightEye();
+            const nose = landmarks.getNose();
+
+            // Simple gaze detection based on eye-nose relationship
+            const eyeCenter = {
+                x: (leftEye[0].x + rightEye[3].x) / 2,
+                y: (leftEye[0].y + rightEye[3].y) / 2
+            };
+            const noseCenter = nose[3];
+
+            // Check if looking significantly away from center
+            const horizontalOffset = Math.abs(eyeCenter.x - noseCenter.x);
+            const faceWidth = detection.detection.box.width;
+            const offsetRatio = horizontalOffset / faceWidth;
+
+            if (offsetRatio > 0.15) { // Looking away threshold
+                lookAwayCount++;
+                updateFaceInfo(`Looking Away! (${lookAwayCount}/3)`);
+                
+                if (lookAwayCount >= 3) {
+                    endQuizForViolation('Multiple instances of looking away detected');
                 }
+            } else {
+                lookAwayCount = Math.max(0, lookAwayCount - 1);
+                updateFaceInfo('Face Detected ✓');
             }
         }
 
-        function endQuizDueToViolation() {
-            quizActive = false;
-            if (timerInterval) {
-                clearInterval(timerInterval);
+        function handleNoFaceDetected() {
+            const timeSinceLastDetection = Date.now() - lastFaceDetection;
+            
+            if (timeSinceLastDetection > 2000) { // 2 seconds without face
+                faceLostWarnings++;
+                updateFaceInfo(`Face Not Detected! (${faceLostWarnings}/3)`);
+                
+                if (faceLostWarnings >= 3) {
+                    endQuizForViolation('Face not visible - student may have turned away');
+                }
+            } else {
+                updateFaceInfo('Scanning for face...');
             }
-            submitQuiz();
+        }
+
+        function handleMultipleFaces() {
+            endQuizForViolation('Multiple faces detected in camera');
+        }
+
+        function endQuizForViolation(reason) {
+            monitoringActive = false;
+            showWarning(`🚫 Test Terminated! ${reason}`);
+            setTimeout(() => {
+                endQuizDueToViolation();
+            }, 3000);
+        }
+
+        function updateFaceInfo(message) {
+            document.getElementById('faceInfo').textContent = message;
         }
 
         // Start Quiz Function
-        function startQuiz() {
+        async function startQuiz() {
             const name = document.getElementById('studentName').value.trim();
             const roll = document.getElementById('rollNo').value.trim();
             const email = document.getElementById('email').value.trim();
@@ -188,9 +238,8 @@
             studentInfo = { name, roll, email };
             testStartTime = new Date();
 
-            // Enter fullscreen mode first
-            enterFullscreen().then(() => {
-                // Only start quiz if fullscreen was successful
+            try {
+                await enterFullscreen();
                 setTimeout(() => {
                     if (isFullscreen()) {
                         quizActive = true;
@@ -198,14 +247,82 @@
                         document.querySelector('.quiz-container').classList.add('active');
                         startTimer();
                         loadQuestion();
+                        startFaceMonitoring();
                     } else {
                         showWarning('Fullscreen mode is required to start the quiz!');
                     }
                 }, 1000);
-            }).catch(err => {
-                console.error('Failed to enter fullscreen:', err);
+            } catch (err) {
                 showWarning('Unable to enter fullscreen mode. Please try again or use a different browser.');
+            }
+        }
+
+        // Security Functions
+        function setupSecurityFeatures() {
+            disableRightClick();
+            preventTabSwitch();
+            preventCopy();
+            detectDevTools();
+            setupFullscreenMonitoring();
+        }
+
+        function enterFullscreen() {
+            const elem = document.documentElement;
+            return elem.requestFullscreen?.() ||
+                   elem.webkitRequestFullscreen?.() ||
+                   elem.msRequestFullscreen?.() ||
+                   elem.mozRequestFullScreen?.() ||
+                   Promise.reject(new Error('Fullscreen not supported'));
+        }
+
+        function exitFullscreen() {
+            if (document.exitFullscreen) document.exitFullscreen();
+            else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+            else if (document.msExitFullscreen) document.msExitFullscreen();
+            else if (document.mozCancelFullScreen) document.mozCancelFullScreen();
+        }
+
+        function isFullscreen() {
+            return !!(document.fullscreenElement || 
+                     document.webkitFullscreenElement || 
+                     document.msFullscreenElement || 
+                     document.mozFullScreenElement);
+        }
+
+        function setupFullscreenMonitoring() {
+            document.addEventListener('fullscreenchange', handleFullscreenChange);
+            document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+            document.addEventListener('mozfullscreenchange', handleFullscreenChange);
+            document.addEventListener('msfullscreenchange', handleFullscreenChange);
+
+            document.addEventListener('keydown', function(e) {
+                if (quizActive) {
+                    if (e.key === 'F11' || e.key === 'Escape') {
+                        e.preventDefault();
+                        showWarning('Function keys are disabled during the quiz!');
+                        return false;
+                    }
+                }
             });
+        }
+
+        function handleFullscreenChange() {
+            if (quizActive && !document.querySelector('.results').classList.contains('active')) {
+                if (!isFullscreen()) {
+                    showWarning('🚫 Quiz terminated! You exited fullscreen mode.');
+                    setTimeout(() => {
+                        endQuizDueToViolation();
+                    }, 2000);
+                }
+            }
+        }
+
+        function endQuizDueToViolation() {
+            quizActive = false;
+            monitoringActive = false;
+            if (timerInterval) clearInterval(timerInterval);
+            if (faceDetectionInterval) clearInterval(faceDetectionInterval);
+            submitQuiz();
         }
 
         // Email Validation
@@ -307,10 +424,10 @@
         // Submit Quiz
         function submitQuiz() {
             quizActive = false;
+            monitoringActive = false;
             
-            if (timerInterval) {
-                clearInterval(timerInterval);
-            }
+            if (timerInterval) clearInterval(timerInterval);
+            if (faceDetectionInterval) clearInterval(faceDetectionInterval);
 
             const unanswered = answers.filter(answer => answer === null).length;
             
@@ -323,9 +440,8 @@
 
             const score = calculateScore();
             const testEndTime = new Date();
-            const duration = Math.round((testEndTime - testStartTime) / 1000 / 60); // in minutes
+            const duration = Math.round((testEndTime - testStartTime) / 1000 / 60);
 
-            // Prepare data for Google Sheets
             const submissionData = {
                 name: studentInfo.name,
                 rollNo: studentInfo.roll,
@@ -337,12 +453,11 @@
                 startTime: testStartTime.toLocaleString(),
                 endTime: testEndTime.toLocaleString(),
                 answers: answers.join(','),
+                aiViolations: faceLostWarnings + lookAwayCount,
                 timestamp: new Date().toISOString()
             };
 
-            // Send to Google Sheets
             sendToGoogleSheets(submissionData);
-            
             showResults(score);
         }
 
@@ -361,14 +476,15 @@
         function showResults(score) {
             document.querySelector('.quiz-container').classList.remove('active');
             document.querySelector('.results').classList.add('active');
+            document.getElementById('cameraContainer').classList.remove('active');
 
             const percentage = Math.round((score / questions.length) * 100);
             document.getElementById('finalScore').textContent = `${score}/${questions.length} (${percentage}%)`;
 
             let message = '';
             if (percentage >= 90) message = '🌟 Excellent! Outstanding performance!';
-            else if (percentage >= 80) message = '👏 Great job! Well done!';
-            else if (percentage >= 70) message = '👍 Good work! Keep it up!';
+            else if (percentage >= 80) message = '👍 Great job! Well done!';
+            else if (percentage >= 70) message = '👌 Good work! Keep it up!';
             else if (percentage >= 60) message = '📚 Pass! Consider reviewing the topics.';
             else message = '📖 Keep studying and try again!';
 
@@ -438,7 +554,6 @@
         function preventCopy() {
             document.addEventListener('keydown', function(e) {
                 if (quizActive) {
-                    // Prevent Ctrl+C, Ctrl+A, Ctrl+V, Ctrl+X, F12, Ctrl+Shift+I
                     if (e.ctrlKey && (e.keyCode === 67 || e.keyCode === 65 || e.keyCode === 86 || e.keyCode === 88)) {
                         e.preventDefault();
                         showWarning('🚫 Copy/paste operations are not allowed!');
@@ -503,23 +618,22 @@
             }
         });
 
-        // Additional security - detect window resize (potential fullscreen exit)
+        // Additional security - detect window resize
         window.addEventListener('resize', function() {
             if (quizActive) {
                 setTimeout(() => {
                     if (!isFullscreen()) {
                         console.log('Window resize detected - checking fullscreen status');
-                        // This will be caught by fullscreen change event
                     }
                 }, 100);
             }
         });
 
-        // Console warning
+        // Console security
         console.log('%c🚫 STOP!', 'color: red; font-size: 50px; font-weight: bold;');
-        console.log('%cThis is a secure quiz environment. Any attempts to cheat will result in test termination.', 'color: red; font-size: 16px;');
+        console.log('%cThis is a secure AI-monitored quiz environment. Any attempts to cheat will result in immediate test termination.', 'color: red; font-size: 16px;');
         
-        // Disable console
+        // Disable console methods
         if (typeof console !== 'undefined') {
             console.clear = () => {};
             console.log = () => {};

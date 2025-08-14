@@ -12,13 +12,16 @@
 <body>
     <div class="container">
         <div class="header">
-            <h1>💻Programming Quiz</h1>
+            <h1>💻 Programming Quiz</h1>
             <p>Test Your Programming Knowledge - Complete All Questions</p>
         </div>
 
         <!-- Student Information Form -->
         <div class="student-form active">
             <h2>📝 Student Information</h2>
+            <div class="ai-monitoring-notice">
+                🔴 AI MONITORING ACTIVE: Your face and eye movements will be tracked throughout this test. Looking away or turning your head will automatically end the quiz!
+            </div>
             <div class="fullscreen-notice">
                 ⚠️ This quiz will automatically enter fullscreen mode. Exiting fullscreen will end your test immediately!
             </div>
@@ -34,7 +37,7 @@
                 <label for="email">Email Address *</label>
                 <input type="email" id="email" required placeholder="Enter your email address">
             </div>
-            <button class="btn" onclick="startQuiz()">🚀 Start Quiz in Fullscreen</button>
+            <button class="btn" onclick="startQuiz()">🚀 Start Quiz</button>
         </div>
 
         <!-- Quiz Container -->
@@ -71,15 +74,24 @@
         </div>
     </div>
 
+    <!-- Camera Container -->
+    <div class="camera-container" id="cameraContainer">
+        <video id="videoElement" autoplay muted playsinline></video>
+        <div class="camera-status" id="cameraStatus"></div>
+        <div class="face-detection-info" id="faceInfo">Initializing AI...</div>
+        <canvas id="canvas" style="display: none;"></canvas>
+    </div>
+
     <!-- Warning Overlay -->
     <div class="warning" id="warningOverlay">
         <div class="warning-content">
             <h2>⚠️ WARNING</h2>
-            <p>Attempting to leave or cheat will end your test immediately!</p>
+            <p>AI monitoring detected suspicious behavior!</p>
             <p id="warningMessage"></p>
         </div>
     </div>
-<script src="script.js"></script>
-    
-</body>
+
+    <!-- Face API Script -->
+    <script defer src="https://cdnjs.cloudflare.com/ajax/libs/face-api.js/0.22.2/face-api.min.js"></script>
+    <script src="script.js"></script>
 </html>
